@@ -719,6 +719,7 @@ class DeclAST : public ASTnode {
 
 public:
   virtual ~DeclAST() {}
+  virtual const std::string& getName() const = 0;
 };
 
 /// VarDeclAST - Class for a variable declaration
@@ -730,7 +731,7 @@ public:
   VarDeclAST(std::unique_ptr<VariableASTnode> var, const std::string &type)
       : Var(std::move(var)), Type(type) {}
   const std::string &getType() const { return Type; }
-  const std::string &getName() const { return Var->getName(); }
+  const std::string &getName() const override { return Var->getName(); }
 
   virtual std::string to_string(int indent = 0) const override {
     return indent_str(indent) + "LocalVarDecl(" + Type + " " + Var->getName() + ")";
@@ -769,7 +770,7 @@ public:
     LocalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
         : Name(name), Type(type), Dimensions(std::move(dims)) {}
     
-    const std::string& getName() const { return Name; }
+    const std::string& getName() const override { return Name; }
     const std::string& getType() const { return Type; }
     const std::vector<int>& getDimensions() const { return Dimensions; }
     
@@ -814,7 +815,7 @@ public:
   GlobVarDeclAST(std::unique_ptr<VariableASTnode> var, const std::string &type)
       : Var(std::move(var)), Type(type) {}
   const std::string &getType() const { return Type; }
-  const std::string &getName() const { return Var->getName(); }
+  const std::string &getName() const override { return Var->getName(); }
 
   virtual std::string to_string(int indent = 0) const override {
     return indent_str(indent) + "GlobalVarDecl(" + Type + " " + Var->getName() + ")";
@@ -851,7 +852,7 @@ public:
     GlobalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
         : Name(name), Type(type), Dimensions(std::move(dims)) {}
     
-    const std::string& getName() const { return Name; }
+    const std::string& getName() const override { return Name; }
     const std::string& getType() const { return Type; }
     
     virtual std::string to_string(int indent = 0) const override {
@@ -1103,12 +1104,11 @@ public:
 };
 
 class AssignExprAST : public ASTnode {
-  std::unique_ptr<VariableASTnode> LHS;
+  std::unique_ptr<VariableASTnode> LHS;  // Changed from VariableASTnode - can be Variable OR ArrayAccess
   std::unique_ptr<ASTnode> RHS;
 
 public:
-  AssignExprAST(std::unique_ptr<VariableASTnode> lhs,
-                std::unique_ptr<ASTnode> rhs)
+  AssignExprAST(std::unique_ptr<VariableASTnode> lhs, std::unique_ptr<ASTnode> rhs)
       :LHS(std::move(lhs)), RHS(std::move(rhs)) {}
 
   virtual std::string to_string(int indent = 0) const override {
@@ -1120,7 +1120,27 @@ public:
     // Generate RHS value
     Value* Val = RHS->codegen();
     if (!Val) return nullptr;
-    
+    /*
+    // Check if LHS is an array access
+    ArrayAccessAST* arrayAccess = dynamic_cast<ArrayAccessAST*>(LHS.get());
+    if (arrayAccess) {
+      Value* elemPtr = arrayAccess->codegenPtr();
+      if (!elemPtr) return nullptr;
+
+      // Get element type for proper type promotion
+      // ... (need to get array info for type)
+      Builder.CreateStore(Val, elemPtr);
+      return Val;
+    }
+
+    // Otherwise, its a regular variable assignment
+    VariableASTnode* varNode = dynamic_cast<VariableASTnode*>(LHS.get());
+    if (!varNode) {
+      return LogErrorV("Invalid left-hand side in assignment");
+    }
+
+    std::string varName = varNode->getName();
+    */
     // Look up variable in local scope first
     AllocaInst* Variable = NamedValues[LHS->getName()];
     if (Variable) {
@@ -1219,6 +1239,8 @@ public:
                   std::unique_ptr<ASTnode> Block)
       : Proto(std::move(Proto)), Block(std::move(Block)) {}
 
+  const std::string& getName() const override { return Proto->getName();}
+  
   virtual std::string to_string(int indent = 0) const override {
     return indent_str(indent) + "FunctionDecl\n  " + 
             Proto->to_string(indent + 1) + "\n  " + 
@@ -1516,7 +1538,7 @@ static std::unique_ptr<ASTnode> ParseStmt();
 static std::unique_ptr<ASTnode> ParseBlock();
 static std::unique_ptr<ASTnode> ParseExper();
 static std::unique_ptr<ParamAST> ParseParam();
-static std::unique_ptr<VarDeclAST> ParseLocalDecl();
+static std::unique_ptr<DeclAST> ParseLocalDecl();
 static std::vector<std::unique_ptr<ASTnode>> ParseStmtListPrime();
 
 // element ::= FLOAT_LIT
@@ -1720,6 +1742,7 @@ FIRST(args) = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, "(", "-", "!", ε}
 */
 
 // Forward declarations for all expression parsing functions
+static std::unique_ptr<ASTnode> ParseAssignExpr();
 static std::unique_ptr<ASTnode> ParseOrExpr();                      // '||'
 static std::unique_ptr<ASTnode> ParseAndExpr();                     // '&&'
 static std::unique_ptr<ASTnode> ParseEqExpr();                      // '==' '!='
@@ -1731,24 +1754,25 @@ static std::unique_ptr<ASTnode> ParsePostfixExpr();                 // calls vs 
 static std::unique_ptr<ASTnode> ParsePrimaryExpr();
 
 static std::unique_ptr<ASTnode> ParseExpr();                        // top-level alias
-static std::unique_ptr<ASTnode> ParseAssignExpr() {                 // '=' (lowest precedence)
+
+// '=' (lowest precedence)
+static std::unique_ptr<ASTnode> ParseAssignExpr() {
   auto lhs = ParseOrExpr(); // next level down in precedence    
 
   if (CurTok.type == ASSIGN) { // '=' token
-
+    // LHS must be a variable OR array access
     VariableASTnode* varNode = dynamic_cast<VariableASTnode*>(lhs.get());
+    // ArrayAccessAST* arrayNode = dynamic_cast<ArrayAccessAST*>(lhs.get());
+
     if (!varNode) {
-      return LogError(CurTok, "left side of assignment must be a variable");
+      return LogError(CurTok, "Left side of assignment must be a variable or array element");
     }
-    TOKEN Op = CurTok;
-    getNextToken();
+
+    // TOKEN Op = CurTok;
+    getNextToken(); // eat '='
     auto rhs = ParseAssignExpr(); // right-associative
     // wrap in AssignExprAST node
-    return std::make_unique<AssignExprAST>(
-        std::unique_ptr<VariableASTnode>(
-          static_cast<VariableASTnode*>(lhs.release())),
-        std::move(rhs)
-    );
+    return std::make_unique<AssignExprAST>(std::unique_ptr<VariableASTnode>( static_cast<VariableASTnode*>(lhs.release())), std::move(rhs));
   }
 
   return lhs;
@@ -1897,6 +1921,32 @@ static std::unique_ptr<ASTnode> ParsePostfixExpr() {      // calls vs plain iden
     std::string callee = varNode->getName();
 
     return std::make_unique<ArgsAST>(callee, std::move(args));
+  }
+
+  if (CurTok.type == LBOX) {
+    // Must be an indentifier for array access
+    VariableASTnode* varNode = dynamic_cast<VariableASTnode*>(expr.get());
+    if (!varNode) {
+      return LogError(CurTok, "Expected identifier before '['");
+    }
+    std::string arrayName = varNode->getName();
+
+    std::vector<std::unique_ptr<ASTnode>> indices;
+
+    while (CurTok.type == LBOX) {
+      getNextToken(); // eat '['
+
+      auto index = ParseAssignExpr(); // Parse index expression
+      if (!index) return nullptr;
+      indices.push_back(std::move(index));
+
+      if (CurTok.type != RBOX) {
+        return LogError(CurTok, "Expected ']' after array index");
+      }
+      getNextToken(); // eat ']'
+    }
+
+    return std::make_unique<ArrayAccessAST>(arrayName, std::move(indices));
   }
   
   return expr;
@@ -2214,11 +2264,11 @@ static std::vector<std::unique_ptr<DeclAST>> ParseLocalDeclsPrime() {
 // var_type ::= "int"
 //           |  "float"
 //           |  "bool"
-static std::unique_ptr<VarDeclAST> ParseLocalDecl() {
+static std::unique_ptr<DeclAST> ParseLocalDecl() {
   TOKEN PrevTok;
   std::string Type;
   std::string Name = "";
-  //std::unique_ptr<VarDeclAST> local_decl;
+  // std::unique_ptr<VarDeclAST> local_decl;
 
   if (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK ||
       CurTok.type == BOOL_TOK) { // FIRST(var_type)
@@ -2271,13 +2321,15 @@ static std::unique_ptr<VarDeclAST> ParseLocalDecl() {
         return nullptr;
       }
       getNextToken(); // eat ';'
+      auto ident = std::make_unique<VariableASTnode>(PrevTok, Name);
       fprintf(stderr, "Parsed a local variable declaration\n");
+      return std::make_unique<VarDeclAST>(std::move(ident), Type);
     } else {
       LogError(CurTok, "expected identifier' in local variable declaration");
       return nullptr;
     }
   }
-  return local_decl;
+  return nullptr;
 }
 
 // local_decls ::= local_decl local_decls_prime
@@ -2353,8 +2405,40 @@ static std::unique_ptr<ASTnode> ParseDecl() {
     if (CurTok.type == IDENT) {
       auto ident = std::make_unique<VariableASTnode>(CurTok, IdName);
       getNextToken(); // eat the IDENT
-      if (CurTok.type ==
-          SC) {         // found ';' then this is a global variable declaration.
+
+      // Check for global array declaration
+      if (CurTok.type == LBOX) {
+        std::vector<int> dimensions;
+
+        while (CurTok.type == LBOX) {
+          getNextToken(); // eat '['
+
+          if (CurTok.type != INT_LIT) {
+            return LogError(CurTok, "Expected integer literal for array dimension");
+          }
+          dimensions.push_back(CurTok.getIntVal());
+          getNextToken(); // eat INT_LIT
+
+          if (CurTok.type != RBOX) {
+            return LogError(CurTok, "Expected ']' after array dimension");
+          }
+          getNextToken(); // eat ']'
+        }
+
+        if (CurTok.type != SC) {
+          return LogError(CurTok, "Expected ';' after array declaration");
+        }
+        getNextToken(); // est ';'
+
+        if (PrevTok.type == VOID_TOK) {
+          return LogError(PrevTok, "Cannot have array with type 'void'");
+        }
+
+        fprintf(stderr, "Parsed a global array declaration\n");
+        return std::make_unique<GlobalArrayDeclAST>(IdName, PrevTok.lexeme, std::move(dimensions));
+      }
+
+      if (CurTok.type == SC) {  // found ';' then this is a global variable declaration.
         getNextToken(); // eat ;
         fprintf(stderr, "Parsed a variable declaration\n");
 
@@ -2365,12 +2449,10 @@ static std::unique_ptr<ASTnode> ParseDecl() {
         } else
           return LogError(PrevTok,
                           "Cannot have variable declaration with type 'void'");
-      } else if (CurTok.type ==
-                 LPAR) { // found '(' then this is a function declaration.
+      } else if (CurTok.type == LPAR) { // found '(' then this is a function declaration.
         getNextToken();  // eat (
 
-        auto P =
-            ParseParams(); // parse the parameters, returns a vector of params
+        auto P = ParseParams(); // parse the parameters, returns a vector of params
         // if (P.size() == 0) return nullptr;
         fprintf(stderr, "Parsed parameter list for function\n");
 
