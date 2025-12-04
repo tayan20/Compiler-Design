@@ -1,4 +1,4 @@
-// MiniC program to test array declarations
+// Self-written MiniC program to test array declarations
 
 extern int print_int(int X);
 

@@ -1,4 +1,4 @@
-// MiniX program to test global array declarations
+// Self-written MiniC program to test global array declarations
 
 extern int print_int(int X);
 

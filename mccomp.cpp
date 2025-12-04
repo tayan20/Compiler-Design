@@ -1104,15 +1104,15 @@ public:
 };
 
 class AssignExprAST : public ASTnode {
-  std::unique_ptr<VariableASTnode> LHS;  // Changed from VariableASTnode - can be Variable OR ArrayAccess
+  std::unique_ptr<ASTnode> LHS;  // Changed from VariableASTnode - can be Variable OR ArrayAccess
   std::unique_ptr<ASTnode> RHS;
 
 public:
-  AssignExprAST(std::unique_ptr<VariableASTnode> lhs, std::unique_ptr<ASTnode> rhs)
+  AssignExprAST(std::unique_ptr<ASTnode> lhs, std::unique_ptr<ASTnode> rhs)
       :LHS(std::move(lhs)), RHS(std::move(rhs)) {}
 
   virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "Assignment(" + LHS->getName() + ")\n" + 
+    return indent_str(indent) + "Assignment\n" + LHS->to_string(indent + 1) + "\n" + 
             RHS->to_string(indent + 1);
   }
 
@@ -1120,7 +1120,7 @@ public:
     // Generate RHS value
     Value* Val = RHS->codegen();
     if (!Val) return nullptr;
-    /*
+    
     // Check if LHS is an array access
     ArrayAccessAST* arrayAccess = dynamic_cast<ArrayAccessAST*>(LHS.get());
     if (arrayAccess) {
@@ -1129,6 +1129,18 @@ public:
 
       // Get element type for proper type promotion
       // ... (need to get array info for type)
+      ArrayInfo* info = nullptr;
+      std::string arrName = arrayAccess->getName();
+      if (LocalArrayInfo.count(arrName)) {
+        info = &LocalArrayInfo[arrName];
+      } else if (GlobalArrayInfo.count(arrName)) {
+        info = &GlobalArrayInfo[arrName];
+      }
+
+      if (info) {
+        Val = promoteType(Val, getLLVMType(info->elementType));
+      }
+
       Builder.CreateStore(Val, elemPtr);
       return Val;
     }
@@ -1140,9 +1152,9 @@ public:
     }
 
     std::string varName = varNode->getName();
-    */
+    
     // Look up variable in local scope first
-    AllocaInst* Variable = NamedValues[LHS->getName()];
+    AllocaInst* Variable = NamedValues[varName];
     if (Variable) {
         // Type check and store locally
         Val = promoteType(Val, Variable->getAllocatedType());
@@ -1151,7 +1163,7 @@ public:
     }
     
     // Check global scope
-    GlobalVariable* GVar = GlobalNamedValues[LHS->getName()];
+    GlobalVariable* GVar = GlobalNamedValues[varName];
     if (GVar) {
         // Type check and store
         Val = promoteType(Val, GVar->getValueType());
@@ -1159,7 +1171,7 @@ public:
         return Val;
     }
     
-    return LogErrorV(("Unknown variable in assignment: " + LHS->getName()).c_str());
+    return LogErrorV(("Unknown variable in assignment: " + varName).c_str());
   }
 };
 
@@ -1762,9 +1774,9 @@ static std::unique_ptr<ASTnode> ParseAssignExpr() {
   if (CurTok.type == ASSIGN) { // '=' token
     // LHS must be a variable OR array access
     VariableASTnode* varNode = dynamic_cast<VariableASTnode*>(lhs.get());
-    // ArrayAccessAST* arrayNode = dynamic_cast<ArrayAccessAST*>(lhs.get());
+    ArrayAccessAST* arrayNode = dynamic_cast<ArrayAccessAST*>(lhs.get());
 
-    if (!varNode) {
+    if (!varNode && !arrayNode) {
       return LogError(CurTok, "Left side of assignment must be a variable or array element");
     }
 
@@ -1772,7 +1784,8 @@ static std::unique_ptr<ASTnode> ParseAssignExpr() {
     getNextToken(); // eat '='
     auto rhs = ParseAssignExpr(); // right-associative
     // wrap in AssignExprAST node
-    return std::make_unique<AssignExprAST>(std::unique_ptr<VariableASTnode>( static_cast<VariableASTnode*>(lhs.release())), std::move(rhs));
+    //return std::make_unique<AssignExprAST>(std::unique_ptr<VariableASTnode>( static_cast<VariableASTnode*>(lhs.release())), std::move(rhs));
+    return std::make_unique<AssignExprAST>(std::move(lhs), std::move(rhs));
   }
 
   return lhs;
@@ -1923,6 +1936,7 @@ static std::unique_ptr<ASTnode> ParsePostfixExpr() {      // calls vs plain iden
     return std::make_unique<ArgsAST>(callee, std::move(args));
   }
 
+  // Check if this is array access
   if (CurTok.type == LBOX) {
     // Must be an indentifier for array access
     VariableASTnode* varNode = dynamic_cast<VariableASTnode*>(expr.get());
