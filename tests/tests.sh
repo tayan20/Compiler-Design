@@ -68,8 +68,8 @@ leap=1
 # array tests -- set to 1 after completing Part 3 - Grand Finale
 array_addition=1
 array_func_arg_1d=1
-matrix_mul=0
-global_array=0
+matrix_mul=1
+global_array=1
 
 
 cd tests/addition/

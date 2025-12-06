@@ -448,6 +448,7 @@ struct ArrayInfo {
 };
 static std::map<std::string, ArrayInfo> LocalArrayInfo; // Local array metadata
 static std::map<std::string, ArrayInfo> GlobalArrayInfo; // Global array metadata
+static std::map<std::string, ArrayInfo> ParamArrayInfo; // Array parameters
 
 // Get LLVM type from string type name
 static Type* getLLVMType(const std::string& typeName) {
@@ -639,10 +640,84 @@ public:
 
   // Returns the pointer to the element (for use in assignment LHS)
   Value* codegenPtr() {
+    // Check if this is an array parameter (passed as pointer)
+    if (ParamArrayInfo.count(Name)) {
+      AllocaInst* PtrAlloca = NamedValues[Name];
+      if (!PtrAlloca) return LogErrorV(("Unknown array parameter: " + Name).c_str());
+
+      ArrayInfo& info = ParamArrayInfo[Name];
+
+      // Load the pointer value
+      Value* Ptr = Builder.CreateLoad(PtrAlloca->getAllocatedType(), PtrAlloca, Name + "_ptr");
+
+      // Generate index values
+      std::vector<Value*> idxList;
+      for (auto& idx: Indices) {
+        Value* idxVal = idx->codegen();
+        if (!idxVal) return nullptr;
+        if (!idxVal->getType()->isIntegerTy(32)) {
+          idxVal = Builder.CreateIntCast(idxVal, Type::getInt32Ty(TheContext), true, "idx_cast");
+        }
+        idxList.push_back(idxVal);
+      }
+
+      //For 1D array parameter: use the single index
+      // For multi-dimensional: calcualte offset
+      if (idxList.size() == 1) {
+        return Builder.CreateGEP(getLLVMType(info.elementType), Ptr, idxList[0], "arrayidx");
+      } else {
+        // Multi-dimensional array parameter - calculate linear offset
+        // For int a[M][N], accessing a[i][j] = a + i*N + j
+        Value* offset = idxList[0];
+        for (size_t i = 1; i < idxList.size(); i++) {
+          Value* dimSize = ConstantInt::get(Type::getInt32Ty(TheContext), info.dimensions[i]);
+          offset = Builder.CreateMul(offset, dimSize, "offset_mul");
+          offset = Builder.CreateAdd(offset, idxList[i], "offset_add");
+        }
+        return Builder.CreateGEP(getLLVMType(info.elementType), Ptr, offset, "arrayidx");
+      }
+    }
     // Look up in local arrays first
     AllocaInst* LocalArr = NamedValues[Name];
+    if (LocalArr && LocalArrayInfo.count(Name)) {
+      ArrayInfo& info = LocalArrayInfo[Name];
+      
+      std::vector<Value*> idxList;
+      idxList.push_back(ConstantInt::get(TheContext, APInt(32, 0)));
+      
+      for (auto& idx : Indices) {
+        Value* idxVal = idx->codegen();
+        if (!idxVal) return nullptr;
+        if (!idxVal->getType()->isIntegerTy(32)) {
+          idxVal = Builder.CreateIntCast(idxVal, Type::getInt32Ty(TheContext), true, "idx_cast");
+        }
+        idxList.push_back(idxVal);
+      }
+      
+      llvm::Type* arrayType = createArrayType(getLLVMType(info.elementType), info.dimensions);
+      return Builder.CreateGEP(arrayType, LocalArr, idxList, "arrayidx");
+    }
     GlobalVariable* GlobalArr = GlobalNamedValues[Name];
-
+    if (GlobalArr && GlobalArrayInfo.count(Name)) {
+      ArrayInfo& info = GlobalArrayInfo[Name];
+      
+      std::vector<Value*> idxList;
+      idxList.push_back(ConstantInt::get(TheContext, APInt(32, 0)));
+      
+      for (auto& idx : Indices) {
+        Value* idxVal = idx->codegen();
+        if (!idxVal) return nullptr;
+        if (!idxVal->getType()->isIntegerTy(32)) {
+          idxVal = Builder.CreateIntCast(idxVal, Type::getInt32Ty(TheContext), true, "idx_cast");
+        }
+        idxList.push_back(idxVal);
+      }
+      
+      llvm::Type* arrayType = createArrayType(getLLVMType(info.elementType), info.dimensions);
+      return Builder.CreateGEP(arrayType, GlobalArr, idxList, "arrayidx");
+    }
+    /*
+    return LogErrorV(("Unknown array: " + Name).c_str());
     ArrayInfo* info = nullptr;
     Value* arrayPtr = nullptr;
 
@@ -679,6 +754,7 @@ public:
     llvm::Type* arrayType = createArrayType(getLLVMType(info->elementType), info->dimensions);
 
     return Builder.CreateGEP(arrayType, arrayPtr, gepIndices, "arrayidx");
+    */
   }
 
   virtual Value* codegen() override {
@@ -686,15 +762,24 @@ public:
     if (!elemPtr) return nullptr;
 
     // Determine element type
-    ArrayInfo* info = nullptr;
+    // ArrayInfo* info = nullptr;
+    std::string elemType = "int"; // default
+    /*
     if (LocalArrayInfo.count(Name)) {
       info = &LocalArrayInfo[Name];
     } else if (GlobalArrayInfo.count(Name)) {
       info = &GlobalArrayInfo[Name];
     }
-
-    llvm::Type* elemType = getLLVMType(info->elementType);
-    return Builder.CreateLoad(elemType, elemPtr, Name + "_elem");
+    */
+    if (ParamArrayInfo.count(Name)) {
+      elemType = ParamArrayInfo[Name].elementType;
+    } else if (LocalArrayInfo.count(Name)) {
+      elemType = LocalArrayInfo[Name].elementType;
+    } else if (GlobalArrayInfo.count(Name)) {
+      elemType = GlobalArrayInfo[Name].elementType;
+    }
+    // llvm::Type* elemType = getLLVMType(info->elementType);
+    return Builder.CreateLoad(getLLVMType(elemType), elemPtr, Name + "_elem");
   }
 };
 
@@ -702,15 +787,30 @@ public:
 class ParamAST {
   std::string Name;
   std::string Type;
+  std::vector<int> ArrayDims; // Empty for non-array, filled for array params
+  bool IsArray;
 
 public:
   ParamAST(const std::string &name, const std::string &type)
-      : Name(name), Type(type) {}
+      : Name(name), Type(type), IsArray(false) {}
+
+  ParamAST(const std::string &name, const std::string &type, std::vector<int> dims)
+      : Name(name), Type(type), ArrayDims(std::move(dims)), IsArray(true) {}
+
   const std::string &getName() const { return Name; }
   const std::string &getType() const { return Type; }
+  bool isArray() const { return IsArray; }
+  const std::vector<int>& getDims() const {return ArrayDims;}
 
   std::string to_string(int indent = 0) const {
-    return indent_str(indent) + "Param(" + Type + " " + Name + ")";
+    std::string result = indent_str(indent) + "Param(" + Type + " " + Name;
+    if (IsArray) {
+      for (int dim : ArrayDims) {
+        result += "[" + std::to_string(dim) + "]";
+      }
+    }
+    result += ")";
+    return result;
   }
 };
 
@@ -921,7 +1021,14 @@ public:
   Function* codegen() {
     std::vector<llvm::Type*> ParamTypes;
     for (auto& P : Params) {
+      if (P->isArray()) {
+        // Array parameters decay to pointers in C
+        // For int a[10], will use ptr (pointer to element type)
+        llvm::Type* elemType = getLLVMType(P->getType());
+        ParamTypes.push_back(PointerType::getUnqual(TheContext));
+      } else {
         ParamTypes.push_back(getLLVMType(P->getType()));
+      }
     }
     
     llvm::Type* RetType = getLLVMType(Type);
@@ -1279,15 +1386,28 @@ public:
     
     // Clear local variables and set current function
     NamedValues.clear();
+    LocalArrayInfo.clear();
+    ParamArrayInfo.clear();
     CurrentFunction = TheFunction;
 
     // Create allocas for function arguments
+    auto& Params = Proto->getParams();
+    unsigned Idx = 0;
     for (auto& Arg : TheFunction->args()) {
         AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, 
                                                      std::string(Arg.getName()),
                                                      Arg.getType());
         Builder.CreateStore(&Arg, Alloca);
         NamedValues[std::string(Arg.getName())] = Alloca;
+
+        // Track array parameters
+        if (Params[Idx]->isArray()) {
+          ArrayInfo info;
+          info.elementType = Params[Idx]->getType();
+          info.dimensions = Params[Idx]->getDims();
+          ParamArrayInfo[std::string(Arg.getName())] = info;
+        }
+        Idx++;
     }
     
     // Generate function body - ADDED ERROR CHECK HERE
@@ -1325,14 +1445,14 @@ public:
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
   
   virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "If\n";
+    std::string result = indent_str(indent) + "If:\n";
     result += indent_str(indent + 1) + "Condition:\n";
     result += Cond->to_string(indent + 1) + "\n";
     result += indent_str(indent + 1) + "Then:\n";
     result += Then->to_string(indent + 2);
     if (Else) {
-      result += indent_str(indent + 1) + "Else:\n";
-      result += Else->to_string(indent + 2);
+      result += indent_str(indent) + "Else:\n";
+      result += Else->to_string(indent + 1);
     }
     return result;
   }
@@ -1609,6 +1729,31 @@ static std::unique_ptr<ParamAST> ParseParam() {
   if (CurTok.type == IDENT) { // parameter declaration
     std::string Name = CurTok.getIdentifierStr();
     getNextToken(); // eat "IDENT"
+
+    // Check for array parameter
+    if (CurTok.type == LBOX) {
+      std::vector<int> dims;
+
+      while (CurTok.type == LBOX) {
+        getNextToken(); // eat '['
+
+        if (CurTok.type != INT_LIT) {
+          LogError(CurTok, "Expected integer literal for array dimension in parameter");
+          return nullptr;
+        }
+        dims.push_back(CurTok.getIntVal());
+        getNextToken(); // eat INT_LIT
+
+        if (CurTok.type != RBOX) {
+          LogError(CurTok, "Expected ']' after array dimension in parameter");
+          return nullptr;
+        }
+        getNextToken(); // eat ']'
+      }
+      
+      return std::make_unique<ParamAST>(Name, Type, std::move(dims));
+    }
+
     return std::make_unique<ParamAST>(Name, Type);  
   }
 
@@ -1764,7 +1909,6 @@ static std::unique_ptr<ASTnode> ParseMulExpr();                     //'*' '/' '%
 static std::unique_ptr<ASTnode> ParseUnaryExpr();                   // prefix '!' '-'
 static std::unique_ptr<ASTnode> ParsePostfixExpr();                 // calls vs plain ident
 static std::unique_ptr<ASTnode> ParsePrimaryExpr();
-
 static std::unique_ptr<ASTnode> ParseExpr();                        // top-level alias
 
 // '=' (lowest precedence)
