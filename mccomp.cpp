@@ -423,8 +423,15 @@ static TOKEN getNextToken() {
 
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
-static std::string indent_str(int level) {
-  return std::string(level * 2, ' '); // 2 Spaces per level
+// Helper function to create tree-style indentation
+static std::string indent_str(int level, bool isLast = false) {
+  if (level == 0) return "";
+  std::string result = "";
+  for (int i = 0; i < level - 1; i++) {
+    result += "|  ";
+  }
+  result += isLast ? "`--" : "|--";
+  return result;
 };
 
 //===----------------------------------------------------------------------===//
@@ -521,21 +528,21 @@ class ASTnode {
 public:
   virtual ~ASTnode() {}
   virtual Value *codegen() { return nullptr; };
-  virtual std::string to_string(int indent = 0) const { return ""; };
+  virtual std::string to_string(int indent = 0, bool isLast = false) const { return ""; };
 };
 
 /// IntASTnode - Class for integer literals like 1, 2, 10,
 class IntASTnode : public ASTnode {
   int Val;
   TOKEN Tok;
-  std::string Name;
+  // std::string Name;
 
 public:
   IntASTnode(TOKEN tok, int val) : Val(val), Tok(tok) {}
   const std::string &getType() const { return Tok.lexeme; }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "IntLiteral(" + std::to_string(Val) + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "IntLiteral(" + std::to_string(Val) + ")";
   }
 
   virtual Value* codegen() override {
@@ -552,8 +559,8 @@ public:
   BoolASTnode(TOKEN tok, bool B) : Bool(B), Tok(tok) {}
   const std::string &getType() const { return Tok.lexeme; }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "BoolLiteral(" + std::string(Bool ? "true" : "false") + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "BoolLiteral(" + std::string(Bool ? "true" : "false") + ")";
   }
 
   virtual Value* codegen() override {
@@ -570,8 +577,8 @@ public:
   FloatASTnode(TOKEN tok, double Val) : Val(Val), Tok(tok) {}
   const std::string &getType() const { return Tok.lexeme; }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "FloatLiteral(" + std::to_string(Val) + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "FloatLiteral(" + std::to_string(Val) + ")";
   }
 
   virtual Value* codegen() override {
@@ -595,8 +602,8 @@ public:
   const std::string &getType() const { return Tok.lexeme; }
   const IDENT_TYPE getVarType() const { return VarType; }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "Variable(" + Name + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "Variable(" + Name + ")";
   }
 
   virtual Value* codegen() override {
@@ -628,12 +635,12 @@ public:
 
   const std::string& getName() const { return Name; }
 
-  virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "ArrayAccess(" + Name + ")\n";
-    result += indent_str(indent + 1) + "Indices:\n";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "ArrayAccess(" + Name + ")";
+    result += "\n" + indent_str(indent + 1, true) + "Indices:";
     for (size_t i = 0; i < Indices.size(); i++) {
-      result += Indices[i]->to_string(indent + 2);
-      if (i < Indices.size() - 1) result += "\n";
+      bool lastIdx = (i == Indices.size() - 1);
+      result += "\n" + Indices[i]->to_string(indent + 2, lastIdx);
     }
     return result;
   }
@@ -716,45 +723,6 @@ public:
       llvm::Type* arrayType = createArrayType(getLLVMType(info.elementType), info.dimensions);
       return Builder.CreateGEP(arrayType, GlobalArr, idxList, "arrayidx");
     }
-    /*
-    return LogErrorV(("Unknown array: " + Name).c_str());
-    ArrayInfo* info = nullptr;
-    Value* arrayPtr = nullptr;
-
-    if (LocalArr && LocalArrayInfo.count(Name)) {
-      info = &LocalArrayInfo[Name];
-      arrayPtr = LocalArr;
-    } else if (GlobalArr && GlobalArrayInfo.count(Name)) {
-      info = &GlobalArrayInfo[Name];
-      arrayPtr = GlobalArr;
-    } else {
-      return LogErrorV(("Unknown array: " + Name).c_str());
-    }
-
-    // Check dimension count matches
-    if (Indices.size() != info->dimensions.size()) {
-      return LogErrorV("Array access dimension mismatch");
-    }
-
-    // Build GEP indices: first index is always 0 (to dereference the pointer)
-    std::vector<Value*> gepIndices;
-    gepIndices.push_back(ConstantInt::get(TheContext, APInt(32, 0)));
-
-    for (auto& idx : Indices) {
-      Value* indexVal = idx->codegen();
-      if (!indexVal) return nullptr;
-      // Ensure index is i32
-      if (!indexVal->getType()->isIntegerTy(32)) {
-        indexVal = Builder.CreateIntCast(indexVal, Type::getInt32Ty(TheContext), true, "idxcast");
-      }
-      gepIndices.push_back(indexVal);
-    }
-
-    // Get element type for GEP
-    llvm::Type* arrayType = createArrayType(getLLVMType(info->elementType), info->dimensions);
-
-    return Builder.CreateGEP(arrayType, arrayPtr, gepIndices, "arrayidx");
-    */
   }
 
   virtual Value* codegen() override {
@@ -802,8 +770,8 @@ public:
   bool isArray() const { return IsArray; }
   const std::vector<int>& getDims() const {return ArrayDims;}
 
-  std::string to_string(int indent = 0) const {
-    std::string result = indent_str(indent) + "Param(" + Type + " " + Name;
+  std::string to_string(int indent = 0, bool isLast = false) const {
+    std::string result = indent_str(indent, isLast) + "Param(" + Type + " " + Name;
     if (IsArray) {
       for (int dim : ArrayDims) {
         result += "[" + std::to_string(dim) + "]";
@@ -833,8 +801,8 @@ public:
   const std::string &getType() const { return Type; }
   const std::string &getName() const override { return Var->getName(); }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "LocalVarDecl(" + Type + " " + Var->getName() + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "LocalVarDecl(" + Type + " " + Var->getName() + ")";
   }
 
   virtual Value* codegen() override {
@@ -874,12 +842,12 @@ public:
     const std::string& getType() const { return Type; }
     const std::vector<int>& getDimensions() const { return Dimensions; }
     
-    virtual std::string to_string(int indent = 0) const override {
+    virtual std::string to_string(int indent = 0, bool isLast = false) const override {
         std::string dimStr = "";
         for (int d : Dimensions) {
             dimStr += "[" + std::to_string(d) + "]";
         }
-        return indent_str(indent) + "LocalArrayDecl(" + Type + " " + Name + dimStr + ")";
+        return indent_str(indent, isLast) + "LocalArrayDecl(" + Type + " " + Name + dimStr + ")";
     }
     
     virtual Value* codegen() override {
@@ -917,8 +885,8 @@ public:
   const std::string &getType() const { return Type; }
   const std::string &getName() const override { return Var->getName(); }
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "GlobalVarDecl(" + Type + " " + Var->getName() + ")";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    return indent_str(indent, isLast) + "GlobalVarDecl(" + Type + " " + Var->getName() + ")";
   }
 
   virtual Value* codegen() override {
@@ -955,12 +923,12 @@ public:
     const std::string& getName() const override { return Name; }
     const std::string& getType() const { return Type; }
     
-    virtual std::string to_string(int indent = 0) const override {
+    virtual std::string to_string(int indent = 0, bool isLast = false) const override {
         std::string dimStr = "";
         for (int d : Dimensions) {
             dimStr += "[" + std::to_string(d) + "]";
         }
-        return indent_str(indent) + "GlobalArrayDecl(" + Type + " " + Name + dimStr + ")";
+        return indent_str(indent, isLast) + "GlobalArrayDecl(" + Type + " " + Name + dimStr + ")";
     }
     
     virtual Value* codegen() override {
@@ -1006,14 +974,11 @@ public:
   int getSize() const { return Params.size(); }
   std::vector<std::unique_ptr<ParamAST>> &getParams() { return Params; }
 
-  std::string to_string(int indent = 0) const {
-    std::string result = indent_str(indent) + "FunctionProto(" + Type + " " + Name + ")\n";
-    
+  std::string to_string(int indent = 0, bool isLast = false) const {
+    std::string result = indent_str(indent, isLast) + "FunctionProto(" + Type + " " + Name + ")";
     for (size_t i = 0; i < Params.size(); i++) {
-      result += Params[i]->to_string(indent + 1);
-      if (i < Params.size() - 1){
-        result += "\n";
-      }
+      bool lastParam = (i == Params.size() - 1);
+      result += "\n" + Params[i]->to_string(indent + 1, lastParam);
     } 
     return result;
   }
@@ -1047,19 +1012,6 @@ public:
   }
 };
 
-/*
-class ExprAST : public ASTnode {
-  std::unique_ptr<ASTnode> Node1;
-  char Op;
-  std::unique_ptr<ASTnode> Node2;
-
-public:
-  ExprAST(std::unique_ptr<ASTnode> node1, char op,
-          std::unique_ptr<ASTnode> node2)
-      : Node1(std::move(node1)), Op(op), Node2(std::move(node2)) {}
-  const std::string &getType();
-};
-*/
 
 class ExprAST : public ASTnode {
   TOKEN OpTok; // which operator: +. -, *, /, ==, &&, etc.
@@ -1081,7 +1033,7 @@ public:
   // optional helpers to inspect operator later in codegen
   TOKEN getOpToken() const { return OpTok; }
 
-  virtual std::string to_string(int indent = 0) const override {
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
     std::string opStr;
     switch(OpTok.type) {
       case PLUS: opStr = "+"; break;
@@ -1103,13 +1055,15 @@ public:
 
     if (LHS) {
       //binary operator
-      return indent_str(indent) + "BinaryExpr(" + opStr + ")\n" + 
-              LHS->to_string(indent + 1) + "\n" + 
-              RHS->to_string(indent + 1);
+      std::string result = indent_str(indent, isLast) + "BinaryExpr(" + opStr + ")";
+      result += "\n" + LHS->to_string(indent + 1, false);
+      result += "\n" + RHS->to_string(indent + 1, true);
+      return result;
     } else {
       // unary operator
-      return indent_str(indent) + "UnaryExpr(" + opStr + ")\n" + 
-              RHS->to_string(indent + 1);
+      std::string result = indent_str(indent, isLast) + "UnaryExpr(" + opStr + ")";
+      result += "\n" + RHS->to_string(indent + 1, true);
+      return result;
     }
   }
 
@@ -1218,9 +1172,11 @@ public:
   AssignExprAST(std::unique_ptr<ASTnode> lhs, std::unique_ptr<ASTnode> rhs)
       :LHS(std::move(lhs)), RHS(std::move(rhs)) {}
 
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "Assignment\n" + LHS->to_string(indent + 1) + "\n" + 
-            RHS->to_string(indent + 1);
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "Assignment";
+    result += "\n" + LHS->to_string(indent + 1, false);
+    result += "\n" + RHS->to_string(indent + 1, true);
+    return result;
   }
 
   virtual Value* codegen() override {
@@ -1292,18 +1248,27 @@ public:
            std::vector<std::unique_ptr<ASTnode>> stmts)
       : LocalDecls(std::move(localDecls)), Stmts(std::move(stmts)) {}
 
-  virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "Block:\n";
-    if (!LocalDecls.empty()) {
-      result += indent_str(indent + 1) + "LocalDecls:\n";
-      for (const auto& decl : LocalDecls) {
-      result += decl->to_string(indent + 2) + "\n";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "Block:";
+
+    bool hasLocalDecls = !LocalDecls.empty();
+    bool hasStmts = !Stmts.empty();
+
+    if (hasLocalDecls) {
+      bool localDeclsLast = !hasStmts;
+      result += "\n" + indent_str(indent + 1, localDeclsLast) + "LocalDecls:";
+      for (size_t i = 0; i < LocalDecls.size(); i++) {
+        bool lastDecl = (i == LocalDecls.size() - 1);
+        result += "\n" + LocalDecls[i]->to_string(indent + 2, lastDecl);
       }
     }
-    if (!Stmts.empty()) {
-      result += indent_str(indent + 1) + "Statements:\n";
-      for (const auto& stmt : Stmts) {
-        if (stmt) result += stmt->to_string(indent + 2) + "\n";
+    if (hasStmts) {
+      result += "\n" + indent_str(indent + 1, true) + "Statements:";
+      for (size_t i = 0; i < Stmts.size(); i++) {
+        if (Stmts[i]) {
+          bool lastStmt = (i == Stmts.size() - 1);
+          result += "\n" + Stmts[i]->to_string(indent + 2, lastStmt);
+        }
       }
     }
     return result;
@@ -1360,10 +1325,11 @@ public:
 
   const std::string& getName() const override { return Proto->getName();}
   
-  virtual std::string to_string(int indent = 0) const override {
-    return indent_str(indent) + "FunctionDecl\n  " + 
-            Proto->to_string(indent + 1) + "\n  " + 
-            Block->to_string(indent + 1);
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "FunctionDecl\n"; 
+    result += "\n" + Proto->to_string(indent + 1, false);
+    result += "\n" + Block->to_string(indent + 1, true);
+    return result;
   }
 
   virtual Value* codegen() override {
@@ -1444,15 +1410,16 @@ public:
             std::unique_ptr<ASTnode> Else)
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
   
-  virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "If:\n";
-    result += indent_str(indent + 1) + "Condition:\n";
-    result += Cond->to_string(indent + 1) + "\n";
-    result += indent_str(indent + 1) + "Then:\n";
-    result += Then->to_string(indent + 2);
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "If:";
+    bool hasElse = (Else != nullptr);
+    result += "\n" + indent_str(indent + 1, false) + "Condition:";
+    result += "\n" + Cond->to_string(indent + 2, true) + "";
+    result += "\n" + indent_str(indent + 1, !hasElse) + "Then:";
+    result += "\n" + Then->to_string(indent + 2, true);
     if (Else) {
-      result += indent_str(indent) + "Else:\n";
-      result += Else->to_string(indent + 1);
+      result += "\n" + indent_str(indent, true) + "Else:";
+      result += "\n" + Else->to_string(indent + 1, true);
     }
     return result;
   }
@@ -1510,12 +1477,12 @@ public:
   WhileExprAST(std::unique_ptr<ASTnode> cond, std::unique_ptr<ASTnode> body)
       : Cond(std::move(cond)), Body(std::move(body)) {}
   
-  virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "WhileStmt\n";
-    result += indent_str(indent + 1) + "Condition:\n";
-    result += Cond->to_string(indent + 2) + "\n";
-    result += indent_str(indent + 1) + "Body:\n";
-    result += Body->to_string(indent + 2);
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "WhileStmt";
+    result += "\n" + indent_str(indent + 1, false) + "Condition:";
+    result += "\n" + Cond->to_string(indent + 2, true);
+    result += "\n" + indent_str(indent + 1, true) + "Body:";
+    result += "\n" + Body->to_string(indent + 2, true);
     return result;
   }
 
@@ -1563,11 +1530,13 @@ class ReturnAST : public ASTnode {
 public:
   ReturnAST(std::unique_ptr<ASTnode> value) : Val(std::move(value)) {}
 
-  virtual std::string to_string(int indent = 0) const override {
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
     if (Val) {
-      return indent_str(indent) + "ReturnStmt:\n" + Val->to_string(indent + 1);
+      std::string result = indent_str(indent, isLast) + "ReturnStmt:";
+      result += "\n" + Val->to_string(indent + 1, true);
+      return result;
     } else {
-      return indent_str(indent) + "ReturnStmt(void)";
+      return indent_str(indent, isLast) + "ReturnStmt(void)";
     }
   }
 
@@ -1596,11 +1565,11 @@ public:
   ArgsAST(const std::string &Callee, std::vector<std::unique_ptr<ASTnode>> list)
       : Callee(Callee), ArgsList(std::move(list)) {}
 
-  virtual std::string to_string(int indent = 0) const override {
-    std::string result = indent_str(indent) + "FunctionCall(" + Callee + ")\n";
+  virtual std::string to_string(int indent = 0, bool isLast = false) const override {
+    std::string result = indent_str(indent, isLast) + "FunctionCall(" + Callee + ")";
     for (size_t i = 0; i < ArgsList.size(); i++) {
-      result += ArgsList[i]->to_string(indent + 1);
-      if (i < ArgsList.size() - 1) result += "\n";
+      bool lastArg = (i == ArgsList.size() - 1);
+      result += "\n" + ArgsList[i]->to_string(indent + 1, lastArg);
     }
     return result;
   }
@@ -1655,11 +1624,6 @@ std::unique_ptr<ASTnode> LogError(const char *Str) {
   exit(2);
   return nullptr;
 }
-
-// Global storage for the AST - stores all top-level declarations
-static std::vector<std::unique_ptr<ASTnode>> TopLevelDecls;
-static std::vector<std::unique_ptr<FunctionPrototypeAST>> ExternDecls;
-
 
 //===----------------------------------------------------------------------===//
 // Recursive Descent - Function call for each production
@@ -1924,11 +1888,9 @@ static std::unique_ptr<ASTnode> ParseAssignExpr() {
       return LogError(CurTok, "Left side of assignment must be a variable or array element");
     }
 
-    // TOKEN Op = CurTok;
     getNextToken(); // eat '='
     auto rhs = ParseAssignExpr(); // right-associative
     // wrap in AssignExprAST node
-    //return std::make_unique<AssignExprAST>(std::unique_ptr<VariableASTnode>( static_cast<VariableASTnode*>(lhs.release())), std::move(rhs));
     return std::make_unique<AssignExprAST>(std::move(lhs), std::move(rhs));
   }
 
@@ -2338,7 +2300,7 @@ static std::unique_ptr<ASTnode> ParseStmt() {
   //  do nothing
   //}
   else { // syntax error
-    return LogError(CurTok, "expected BLA BLA\n");
+    return LogError(CurTok, "unexpected token in statement\n");
   }
   return nullptr;
 }
@@ -2660,8 +2622,6 @@ static void ParseDeclListPrime() {
     if (auto decl = ParseDecl()) {
       ProgramAST.push_back(std::move(decl));
       fprintf(stderr, "Parsed a top-level variable or function declaration\n");
-      // fprintf(stderr, "AST: %s\n", decl->to_string().c_str());
-      // TopLevelDecls.push_back(std::move(decl));
     }
     ParseDeclListPrime();
   } else if (CurTok.type == EOF_TOK) { // FOLLOW(decl_list_prime)
@@ -2678,7 +2638,6 @@ static void ParseDeclList() {
   if (decl) {
     ProgramAST.push_back(std::move(decl));
     fprintf(stderr, "Parsed a top-level variable or function declaration\n");
-    // TopLevelDecls.push_back(std::move(decl));
     ParseDeclListPrime();
   }
 }
@@ -2751,7 +2710,6 @@ static void ParseExternListPrime() {
       ExternAST.push_back(std::move(Extern));
       fprintf(stderr,
               "Parsed a top-level external function declaration -- 2\n");
-      // ExternDecls.push_back(std::move(Extern)); // store extern in global AST
     }
     ParseExternListPrime();
   } else if (CurTok.type == VOID_TOK || CurTok.type == INT_TOK ||
@@ -2768,8 +2726,6 @@ static void ParseExternListPrime() {
 static void ParseExternList() {
   auto Extern = ParseExtern();
   if (Extern) {
-    // fprintf(stderr, "Parsed a top-level external function declaration -- 1\n");
-    // ExternDecls.push_back(std::move(Extern)); // Store extern in global AST
     ExternAST.push_back(std::move(Extern));
     fprintf(stderr, "Parsed a top-level external function declaration -- 1\n");
     // fprintf(stderr, "Current token: %s \n", CurTok.lexeme.c_str());
@@ -2801,17 +2757,17 @@ static void PrintAST() {
   fprintf(stderr, "\n");
   
   // Print extern declarations
-  if (!ExternDecls.empty()) {
+  if (!ExternAST.empty()) {
     fprintf(stderr, "=== Extern Declarations ===\n");
-    for (const auto& externDecl : ExternDecls) {
+    for (const auto& externDecl : ExternAST) {
       fprintf(stderr, "%s\n\n", externDecl->to_string().c_str());
     }
   }
   
   // Print top-level declarations
-  if (!TopLevelDecls.empty()) {
+  if (!ProgramAST.empty()) {
     fprintf(stderr, "=== Top-Level Declarations ===\n");
-    for (const auto& decl : TopLevelDecls) {
+    for (const auto& decl : ProgramAST) {
       fprintf(stderr, "%s\n\n", decl->to_string().c_str());
     }
   }
@@ -2849,6 +2805,7 @@ int main(int argc, char **argv) {
   parser();
   fprintf(stderr, "Parsing Finished\n");
 
+  /*
   fprintf(stderr, "\n=== Abstract Syntax Tree ===\n");
   for (const auto& ext : ExternAST) {
     fprintf(stderr, "AST: %s\n", ext->to_string().c_str());
@@ -2857,9 +2814,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "AST: %s\n", node->to_string().c_str());
   }
   fprintf(stderr, "=== End of AST ===\n\n");
+  */
 
   // Print the complete AST after successful parse
-  // PrintAST();
+  PrintAST();
 
   fprintf(stderr, "Starting code generation...\n");
 
@@ -2889,18 +2847,6 @@ int main(int argc, char **argv) {
 
   fprintf(stderr, "Code generation finished\n");
 
-  // Generate code for extern declarations
-  // for (auto& Extern : ExternDecls) {
-  //   Extern->codegen();
-  // }
-
-  // Generate code for all top-level declarations
-  // for (auto& Decl : TopLevelDecls) {
-  //   Decl->codegen();
-  // }
-
-  fprintf(stderr, "Code generation finished\n");
-
   printf(
       "********************* FINAL IR (begin) ****************************\n");
 
@@ -2922,43 +2868,4 @@ int main(int argc, char **argv) {
 
   fclose(pFile);
   return 0;
-  /*
-  while (CurTok.type != EOF_TOK) {
-    fprintf(stderr, "Token: %s with type %d\n", CurTok.lexeme.c_str(),
-            CurTok.type);
-    getNextToken();
-  }
-  fprintf(stderr, "Lexer Finished\n");
-
-  // Make the module, which holds all the code.
-  TheModule = std::make_unique<Module>("mini-c", TheContext);
-*/
-
-  // Run the parser now.
-
-  /* UNCOMMENT : Task 2 - Parser */
-  /*
-  parser();
-  fprintf(stderr, "Parsing Finished\n");  
-
-  printf(
-      "********************* FINAL IR (begin) ****************************\n");
-  // Print out all of the generated code into a file called output.ll
-  // printf("%s\n", argv[1]);
-  auto Filename = "output.ll";
-  std::error_code EC;
-  raw_fd_ostream dest(Filename, EC, sys::fs::OF_None);
-
-  if (EC) {
-    errs() << "Could not open file: " << EC.message();
-    return 1;
-  }
-  // TheModule->print(errs(), nullptr); // print IR to terminal
-  TheModule->print(dest, nullptr);
-  printf(
-      "********************* FINAL IR (end) ******************************\n");
-
-  fclose(pFile); // close the file that contains the code that was parsed
-  return 0;
-*/
-  }
+}
