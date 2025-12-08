@@ -183,8 +183,7 @@ static TOKEN gettok() {
     columnNo++;
   }
 
-  if (isalpha(LastChar) ||
-      (LastChar == '_')) { // identifier: [a-zA-Z_][a-zA-Z_0-9]*
+  if (isalpha(LastChar) || (LastChar == '_')) { // identifier: [a-zA-Z_][a-zA-Z_0-9]*
     globalLexeme = LastChar;
     columnNo++;
 
@@ -471,9 +470,9 @@ static Type* getLLVMType(const std::string& typeName) {
 static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, 
                                           const std::string& VarName,
                                           Type* type) {
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                      TheFunction->getEntryBlock().begin());
-    return TmpB.CreateAlloca(type, nullptr, VarName);
+  return TmpB.CreateAlloca(type, nullptr, VarName);
 }
 
 // PART 3 ADDITION
@@ -853,11 +852,11 @@ public:
     // Initialize to 0
     Value* InitVal;
     if (VarType->isFloatTy())
-        InitVal = ConstantFP::get(TheContext, APFloat(0.0f));
+      InitVal = ConstantFP::get(TheContext, APFloat(0.0f));
     else if (VarType->isIntegerTy(1))
-        InitVal = ConstantInt::get(TheContext, APInt(1, 0));
+      InitVal = ConstantInt::get(TheContext, APInt(1, 0));
     else
-        InitVal = ConstantInt::get(TheContext, APInt(32, 0));
+      InitVal = ConstantInt::get(TheContext, APInt(32, 0));
     
     Builder.CreateStore(InitVal, Alloca);
     NamedValues[getName()] = Alloca;
@@ -869,49 +868,49 @@ public:
 // PART 3 ADDITION
 /// LocalArrayDeclAST - Class for local array declarations like int arr[5][10];
 class LocalArrayDeclAST : public DeclAST {
-    std::string Name;
-    std::string Type;
-    std::vector<int> Dimensions;
+  std::string Name;
+  std::string Type;
+  std::vector<int> Dimensions;
 
 public:
-    LocalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
-        : Name(name), Type(type), Dimensions(std::move(dims)) {}
+  LocalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
+      : Name(name), Type(type), Dimensions(std::move(dims)) {}
     
-    const std::string& getName() const override { return Name; }
-    const std::string& getType() const { return Type; }
-    const std::vector<int>& getDimensions() const { return Dimensions; }
+  const std::string& getName() const override { return Name; }
+  const std::string& getType() const { return Type; }
+  const std::vector<int>& getDimensions() const { return Dimensions; }
     
-    virtual std::string to_string(const std::string& prefix = "", bool isLast = true) const override {
-        std::string dimStr = "";
-        for (int d : Dimensions) {
-            dimStr += "[" + std::to_string(d) + "]";
-        }
-        return prefix + getConnector(isLast) + "LocalArrayDecl(" + Type + " " + Name + dimStr + ")";
-    }
+  virtual std::string to_string(const std::string& prefix = "", bool isLast = true) const override {
+    std::string dimStr = "";
+      for (int d : Dimensions) {
+        dimStr += "[" + std::to_string(d) + "]";
+      }
+      return prefix + getConnector(isLast) + "LocalArrayDecl(" + Type + " " + Name + dimStr + ")";
+  }
     
     // Generate code for local array with zero initialisation via memset
-    virtual Value* codegen() override {
-        Function* TheFunction = Builder.GetInsertBlock()->getParent();
-        llvm::Type* elemType = getLLVMType(Type);
-        llvm::Type* arrayType = createArrayType(elemType, Dimensions);
+  virtual Value* codegen() override {
+    Function* TheFunction = Builder.GetInsertBlock()->getParent();
+    llvm::Type* elemType = getLLVMType(Type);
+    llvm::Type* arrayType = createArrayType(elemType, Dimensions);
         
-        // Create alloca for the array
-        AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, Name, arrayType);
+    // Create alloca for the array
+    AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, Name, arrayType);
         
-        // Initialize array to zero
-        Builder.CreateMemSet(
-            Alloca,
-            ConstantInt::get(Type::getInt8Ty(TheContext), 0),
-            TheModule->getDataLayout().getTypeAllocSize(arrayType),
-            Alloca->getAlign()
-        );
+    // Initialize array to zero
+    Builder.CreateMemSet(
+        Alloca,
+        ConstantInt::get(Type::getInt8Ty(TheContext), 0),
+        TheModule->getDataLayout().getTypeAllocSize(arrayType),
+        Alloca->getAlign()
+    );
         
-        // Store in symbol tables
-        NamedValues[Name] = Alloca;
-        LocalArrayInfo[Name] = {Type, Dimensions};
+    // Store in symbol tables
+    NamedValues[Name] = Alloca;
+    LocalArrayInfo[Name] = {Type, Dimensions};
         
-        return Alloca;
-    }
+    return Alloca;
+  }
 };
 
 /// GlobVarDeclAST - Class for a Global variable declaration
@@ -953,51 +952,51 @@ public:
 // PART 3 ADDITION
 /// GlobalArrayDeclAST - Class for global array declarations
 class GlobalArrayDeclAST : public DeclAST {
-    std::string Name;
-    std::string Type;
-    std::vector<int> Dimensions;
+  std::string Name;
+  std::string Type;
+  std::vector<int> Dimensions;
 
 public:
-    GlobalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
+  GlobalArrayDeclAST(const std::string& name, const std::string& type, std::vector<int> dims)
         : Name(name), Type(type), Dimensions(std::move(dims)) {}
     
-    const std::string& getName() const override { return Name; }
-    const std::string& getType() const { return Type; }
+  const std::string& getName() const override { return Name; }
+  const std::string& getType() const { return Type; }
     
-    virtual std::string to_string(const std::string& prefix = "", bool isLast = true) const override {
-        std::string dimStr = "";
-        for (int d : Dimensions) {
-            dimStr += "[" + std::to_string(d) + "]";
-        }
-        return prefix + getConnector(isLast) + "GlobalArrayDecl(" + Type + " " + Name + dimStr + ")";
+  virtual std::string to_string(const std::string& prefix = "", bool isLast = true) const override {
+    std::string dimStr = "";
+    for (int d : Dimensions) {
+      dimStr += "[" + std::to_string(d) + "]";
     }
+    return prefix + getConnector(isLast) + "GlobalArrayDecl(" + Type + " " + Name + dimStr + ")";
+  }
     
-    // Generate global array with zero initialisation
-    virtual Value* codegen() override {
-        llvm::Type* elemType = getLLVMType(Type);
-        llvm::Type* arrayType = createArrayType(elemType, Dimensions);
+  // Generate global array with zero initialisation
+  virtual Value* codegen() override {
+    llvm::Type* elemType = getLLVMType(Type);
+    llvm::Type* arrayType = createArrayType(elemType, Dimensions);
         
-        // Check for redeclaration
-        if (GlobalNamedValues.count(Name)) {
-            return LogErrorV(("Global array already defined: " + Name).c_str());
-        }
-        
-        // Create global variable with zero initializer
-        GlobalVariable* GVar = new GlobalVariable(
-            *TheModule,
-            arrayType,
-            false,  // not constant
-            GlobalValue::CommonLinkage,
-            Constant::getNullValue(arrayType),
-            Name
-        );
-        
-        // Store in symbol tables
-        GlobalNamedValues[Name] = GVar;
-        GlobalArrayInfo[Name] = {Type, Dimensions};
-        
-        return GVar;
+    // Check for redeclaration
+    if (GlobalNamedValues.count(Name)) {
+      return LogErrorV(("Global array already defined: " + Name).c_str());
     }
+        
+    // Create global variable with zero initializer
+    GlobalVariable* GVar = new GlobalVariable(
+        *TheModule,
+        arrayType,
+        false,  // not constant
+        GlobalValue::CommonLinkage,
+        Constant::getNullValue(arrayType),
+        Name
+    );
+        
+    // Store in symbol tables
+    GlobalNamedValues[Name] = GVar;
+    GlobalArrayInfo[Name] = {Type, Dimensions};
+        
+    return GVar;
+  }
 };
 
 /// FunctionPrototypeAST - Class for a function declaration's signature
@@ -1121,52 +1120,52 @@ public:
   }
 
   virtual Value* codegen() override {
-  // Handle unary operators (LHS is nullptr)
-  if (!LHS) {
+    // Handle unary operators (LHS is nullptr)
+    if (!LHS) {
       Value* R = RHS->codegen();
       if (!R) return nullptr;
       
       switch(OpTok.type) {
-          case NOT: {
-              // Convert to bool first if needed, then negate
-              if (!R->getType()->isIntegerTy(1)) {
-                  R = Builder.CreateICmpNE(R, ConstantInt::get(R->getType(), 0), "tobool");
-              }
-              return Builder.CreateNot(R, "nottmp");
+        case NOT: {
+          // Convert to bool first if needed, then negate
+          if (!R->getType()->isIntegerTy(1)) {
+            R = Builder.CreateICmpNE(R, ConstantInt::get(R->getType(), 0), "tobool");
           }
-          case MINUS: {
-              if (R->getType()->isFloatTy())
-                  return Builder.CreateFNeg(R, "negtmp");
-              else
-                  return Builder.CreateNeg(R, "negtmp");
-          }
-          default:
-              return LogErrorV("Invalid unary operator");
+          return Builder.CreateNot(R, "nottmp");
+        }
+        case MINUS: {
+          if (R->getType()->isFloatTy())
+            return Builder.CreateFNeg(R, "negtmp");
+          else
+            return Builder.CreateNeg(R, "negtmp");
+        }
+        default:
+          return LogErrorV("Invalid unary operator");
       }
-  }
-
-  // Handle binary operators
-  Value* L = LHS->codegen();
-  Value* R = RHS->codegen();
-  if (!L || !R) return nullptr;
-  
-  // Type coercion - promote to common type
-  // If either is float, promote both to float
-  // Else if either is int, promote both to int (from bool)
-  if (L->getType() != R->getType()) {
-    if (L->getType()->isFloatTy() || R->getType()->isFloatTy()) {
-      L = promoteType(L, Type::getFloatTy(TheContext));
-      R = promoteType(R, Type::getFloatTy(TheContext));
-    } else if (L->getType()->isIntegerTy(32) || R->getType()->isIntegerTy(32)) {
-      L = promoteType(L, Type::getInt32Ty(TheContext));
-      R = promoteType(R, Type::getInt32Ty(TheContext));
     }
-  }
 
-  // Determine floating-point or integer instructions
-  bool isFloat = L->getType()->isFloatTy();
+    // Handle binary operators
+    Value* L = LHS->codegen();
+    Value* R = RHS->codegen();
+    if (!L || !R) return nullptr;
+  
+    // Type coercion - promote to common type
+    // If either is float, promote both to float
+    // Else if either is int, promote both to int (from bool)
+    if (L->getType() != R->getType()) {
+      if (L->getType()->isFloatTy() || R->getType()->isFloatTy()) {
+        L = promoteType(L, Type::getFloatTy(TheContext));
+        R = promoteType(R, Type::getFloatTy(TheContext));
+      } else if (L->getType()->isIntegerTy(32) || R->getType()->isIntegerTy(32)) {
+        L = promoteType(L, Type::getInt32Ty(TheContext));
+        R = promoteType(R, Type::getInt32Ty(TheContext));
+      }
+    }
+
+    // Determine floating-point or integer instructions
+    bool isFloat = L->getType()->isFloatTy();
     
-  // Operator code generation
+    // Operator code generation
     switch(OpTok.type) {
       // Aritmetic operations
       case PLUS:
@@ -1279,21 +1278,21 @@ public:
     // Look up variable in local scope first
     AllocaInst* Variable = NamedValues[varName];
     if (Variable) {
-        // Type check and store locally
-        Val = promoteTypeWithCheck(Val, Variable->getAllocatedType(), "variable assignment");
-        if (!Val) return nullptr;
-        Builder.CreateStore(Val, Variable);
-        return Val;
+      // Type check and store locally
+      Val = promoteTypeWithCheck(Val, Variable->getAllocatedType(), "variable assignment");
+      if (!Val) return nullptr;
+      Builder.CreateStore(Val, Variable);
+      return Val;
     }
     
     // Check global scope
     GlobalVariable* GVar = GlobalNamedValues[varName];
     if (GVar) {
-        // Type check and store
-        Val = promoteTypeWithCheck(Val, GVar->getValueType(), "variable assignment");
-        if (!Val) return nullptr;
-        Builder.CreateStore(Val, GVar);
-        return Val;
+      // Type check and store
+      Val = promoteTypeWithCheck(Val, GVar->getValueType(), "variable assignment");
+      if (!Val) return nullptr;
+      Builder.CreateStore(Val, GVar);
+      return Val;
     }
     // Variable not found
     return LogErrorV(("Unknown variable in assignment: " + varName).c_str());
@@ -1355,33 +1354,33 @@ public:
     
     // Generate code for local declarations
     for (auto& Decl : LocalDecls) {
-        // Save old binding if variable shadows outer scope
-        if (NamedValues.count(Decl->getName())) {
-            OldBindings[Decl->getName()] = NamedValues[Decl->getName()];
-        }
-        Decl->codegen();
+      // Save old binding if variable shadows outer scope
+      if (NamedValues.count(Decl->getName())) {
+        OldBindings[Decl->getName()] = NamedValues[Decl->getName()];
+      }
+      Decl->codegen();
     }
     
     // Generate code for statements
     Value* LastVal = nullptr;
     for (auto& Stmt : Stmts) {
-        if (Stmt) {
-            LastVal = Stmt->codegen();
-            // Stop if we hit a terminator (return statement)
-            if (Builder.GetInsertBlock()->getTerminator())
-                break;
+      if (Stmt) {
+        LastVal = Stmt->codegen();
+        // Stop if we hit a terminator (return statement)
+        if (Builder.GetInsertBlock()->getTerminator())
+          break;
         }
     }
 
     // Restore outer scope bindings
     for (auto& Binding : OldBindings) {
-        NamedValues[Binding.first] = Binding.second;
+      NamedValues[Binding.first] = Binding.second;
     }
     // Remove local variables that weren't shadowing outer scope
     for (auto& Decl : LocalDecls) {
-        if (!OldBindings.count(Decl->getName())) {
-            NamedValues.erase(Decl->getName());
-        }
+      if (!OldBindings.count(Decl->getName())) {
+        NamedValues.erase(Decl->getName());
+      }
     }
     
     return LastVal;
@@ -1417,7 +1416,7 @@ public:
     Function* TheFunction = TheModule->getFunction(Proto->getName());
     
     if (!TheFunction) {
-        TheFunction = Proto->codegen();
+      TheFunction = Proto->codegen();
     }
     
     if (!TheFunction) return nullptr;
@@ -1442,21 +1441,20 @@ public:
     unsigned Idx = 0;
     for (auto& Arg : TheFunction->args()) {
       // Create alloca in entry block for this parameter
-        AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, std::string(Arg.getName()),
-                                                     Arg.getType());
-        // Store incoming argument value into the alloca                                            
-        Builder.CreateStore(&Arg, Alloca);
-        // Register in symbol table for lookup during body codegen
-        NamedValues[std::string(Arg.getName())] = Alloca;
-
-        // Track array parameters
-        if (Params[Idx]->isArray()) {
-          ArrayInfo info;
-          info.elementType = Params[Idx]->getType();
-          info.dimensions = Params[Idx]->getDims();
-          ParamArrayInfo[std::string(Arg.getName())] = info;
-        }
-        Idx++;
+      AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, std::string(Arg.getName()),
+                                                   Arg.getType());
+      // Store incoming argument value into the alloca                                            
+      Builder.CreateStore(&Arg, Alloca);
+      // Register in symbol table for lookup during body codegen
+      NamedValues[std::string(Arg.getName())] = Alloca;
+      // Track array parameters
+      if (Params[Idx]->isArray()) {
+        ArrayInfo info;
+        info.elementType = Params[Idx]->getType();
+        info.dimensions = Params[Idx]->getDims();
+        ParamArrayInfo[std::string(Arg.getName())] = info;
+      }
+      Idx++;
     }
     
     // Generate function body
@@ -1469,12 +1467,12 @@ public:
     
     // Add implicit return if function body doesn't end with return
     if (!Builder.GetInsertBlock()->getTerminator()) {
-        if (TheFunction->getReturnType()->isVoidTy()) {
-            Builder.CreateRetVoid();
-        } else {
-            // Return default value (0 or 0.0)
-            Builder.CreateRet(Constant::getNullValue(TheFunction->getReturnType()));
-        }
+      if (TheFunction->getReturnType()->isVoidTy()) {
+        Builder.CreateRetVoid();
+      } else {
+        // Return default value (0 or 0.0)
+        Builder.CreateRet(Constant::getNullValue(TheFunction->getReturnType()));
+      }
     }
 
     // Verify function
@@ -1527,8 +1525,8 @@ public:
     
     // Convert condition to bool if needed
     if (!CondV->getType()->isIntegerTy(1)) {
-        CondV = Builder.CreateICmpNE(CondV, 
-            ConstantInt::get(CondV->getType(), 0), "ifcond");
+      CondV = Builder.CreateICmpNE(CondV, 
+          ConstantInt::get(CondV->getType(), 0), "ifcond");
     }
     
     // Create basic blocks for then, else, and merge paths
@@ -1540,9 +1538,9 @@ public:
     
     // Branch to 'then' if condition is true, else to 'else' block (or merge if no else)
     if (Else) {
-        Builder.CreateCondBr(CondV, ThenBB, ElseBB);
+      Builder.CreateCondBr(CondV, ThenBB, ElseBB);
     } else {
-        Builder.CreateCondBr(CondV, ThenBB, MergeBB);
+      Builder.CreateCondBr(CondV, ThenBB, MergeBB);
     }
 
     // Emit code for then block
@@ -1553,11 +1551,11 @@ public:
     
     // Emit code for else block if it exists
     if (Else) {
-        TheFunction->insert(TheFunction->end(), ElseBB);
-        Builder.SetInsertPoint(ElseBB);
-        Else->codegen();
-        if (!Builder.GetInsertBlock()->getTerminator())
-            Builder.CreateBr(MergeBB);
+      TheFunction->insert(TheFunction->end(), ElseBB);
+      Builder.SetInsertPoint(ElseBB);
+      Else->codegen();
+      if (!Builder.GetInsertBlock()->getTerminator())
+        Builder.CreateBr(MergeBB);
     }
     
     // Both branches converge
@@ -1616,8 +1614,8 @@ public:
     
     // Convert to bool if needed
     if (!CondV->getType()->isIntegerTy(1)) {
-        CondV = Builder.CreateICmpNE(CondV, 
-            ConstantInt::get(CondV->getType(), 0), "loopcond");
+      CondV = Builder.CreateICmpNE(CondV, 
+        ConstantInt::get(CondV->getType(), 0), "loopcond");
     }
 
     // Branch: if condition true -> loop body, else -> after loop
@@ -1659,17 +1657,17 @@ public:
 
   virtual Value* codegen() override {
     if (Val) {
-        Value* RetVal = Val->codegen();
-        if (!RetVal) return nullptr;
-        
-        // Type check return value against function return type
-        Type* FuncRetType = CurrentFunction->getReturnType();
-        RetVal = promoteTypeWithCheck(RetVal, FuncRetType, "return statement");
-        if (!RetVal) return nullptr;
-        
-        return Builder.CreateRet(RetVal);
+      Value* RetVal = Val->codegen();
+      if (!RetVal) return nullptr;
+      
+      // Type check return value against function return type
+      Type* FuncRetType = CurrentFunction->getReturnType();
+      RetVal = promoteTypeWithCheck(RetVal, FuncRetType, "return statement");
+      if (!RetVal) return nullptr;
+      
+      return Builder.CreateRet(RetVal);
     } else {
-        return Builder.CreateRetVoid();
+      return Builder.CreateRetVoid();
     }
   }
 };
@@ -1721,7 +1719,7 @@ public:
     
     // Create call instruction
     if (CalleeF->getReturnType()->isVoidTy()) {
-        return Builder.CreateCall(CalleeF, ArgsV);
+      return Builder.CreateCall(CalleeF, ArgsV);
     }
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
   }
@@ -2269,8 +2267,7 @@ static std::unique_ptr<ASTnode> ParseElseStmt() {
     getNextToken(); // eat "else"
 
     if (!(CurTok.type == LBRA)) {
-      return LogError(
-          CurTok, "Expected '{' to start else block");
+      return LogError(CurTok, "Expected '{' to start else block");
     }
     auto Else = ParseBlock();
     if (!Else)
@@ -2681,8 +2678,7 @@ static std::unique_ptr<ASTnode> ParseDecl() {
           auto globVar = std::make_unique<GlobVarDeclAST>(std::move(ident), PrevTok.lexeme);
           return globVar;
         } else
-          return LogError(PrevTok,
-                          "Cannot have variable declaration with type 'void'");
+          return LogError(PrevTok, "Cannot have variable declaration with type 'void'");
       } else if (CurTok.type == LPAR) { // found '(' then this is a function declaration.
         getNextToken();  // eat (
 
@@ -2694,8 +2690,7 @@ static std::unique_ptr<ASTnode> ParseDecl() {
 
         getNextToken();          // eat )
         if (CurTok.type != LBRA) // syntax error
-          return LogError(
-              CurTok, "Expected '{' to start function body");
+          return LogError(CurTok, "Expected '{' to start function body");
 
         auto B = ParseBlock(); // parse the function body
         if (!B)
@@ -2708,8 +2703,7 @@ static std::unique_ptr<ASTnode> ParseDecl() {
         // and return a std::unique_ptr<FunctionDeclAST>
         fprintf(stderr, "Parsed a function declaration\n");
 
-        auto Proto = std::make_unique<FunctionPrototypeAST>(
-            IdName, PrevTok.lexeme, std::move(P));
+        auto Proto = std::make_unique<FunctionPrototypeAST>(IdName, PrevTok.lexeme, std::move(P));
         auto funcDecl = std::make_unique<FunctionDeclAST>(std::move(Proto), std::move(B));
         return funcDecl;
       } else
@@ -2771,12 +2765,10 @@ static std::unique_ptr<FunctionPrototypeAST> ParseExtern() {
         auto ident = std::make_unique<VariableASTnode>(CurTok, IdName);
         getNextToken(); // eat the IDENT
 
-        if (CurTok.type ==
-            LPAR) {       // found '(' - this is an extern function declaration.
+        if (CurTok.type == LPAR) {       // found '(' - this is an extern function declaration.
           getNextToken(); // eat (
 
-          auto P =
-              ParseParams(); // parse the parameters, returns a vector of params
+          auto P = ParseParams(); // parse the parameters, returns a vector of params
           if (P.size() == 0)
             return nullptr;
           else
