@@ -1,3 +1,5 @@
+// 2241543 Compiler Design Coursework
+
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
@@ -1804,7 +1806,7 @@ static std::vector<std::unique_ptr<ParamAST>> ParseParamListPrime() {
   return param_list;
 }
 
-// param ::= var_type IDENT
+// param ::= var_type IDENT | var_type IDENT array_dims
 static std::unique_ptr<ParamAST> ParseParam() {
   std::string Type = CurTok.lexeme; // keep track of the type of the param
   getNextToken();                   // eat the type token
@@ -1886,9 +1888,7 @@ static std::vector<std::unique_ptr<ParamAST>> ParseParams() {
     // expand by params ::= ε
     // do nothing
   } else {
-    LogError(
-        CurTok,
-        "Expected parameter type or ')' in function parameters");
+    LogError(CurTok, "Expected parameter type or ')' in function parameters");
   }
 
   return param_list;
@@ -1896,88 +1896,10 @@ static std::vector<std::unique_ptr<ParamAST>> ParseParams() {
 
 /*** Task 2 - Parser ***
 
-*** Original Grammar (before transformation) ***
+*** Expression parsing uses a precedence-climbing approach with the following hierarchy
+* (lowest to highest): assignment, ||, &&, ==/!=, </<=/>=/>, +/-, * or /%, unary -/!, postfix
 
-// args ::= arg_list
-//      |  ε
-// arg_list ::= arg_list "," expr
-//      | expr
-
-// rval ::= rval "||" rval
-//      | rval "&&" rval
-//      | rval "==" rval | rval "!=" rval
-//      | rval "<=" rval | rval "<" rval | rval ">=" rval | rval ">" rval
-//      | rval "+" rval | rval "-" rval
-//      | rval "*" rval | rval "/" rval | rval "%" rval
-//      | "-" rval | "!" rval
-//      | "(" expr ")"
-//      | IDENT | IDENT "(" args ")"
-//      | INT_LIT | FLOAT_LIT | BOOL_LIT
-**/
-
-// expr ::= IDENT "=" expr
-//      |  rval
-
-
-
-/*
-NEW TRANSFORMED GRAMMAR
-expr ::= assign_expr
-
-assign_expr ::= or_expr assign_expr'
-assign_expr' ::= "=" assign_expr | ε
-
-or_expr ::= and_expr or_expr'
-or_expr' ::= "||" and_expr or_expr' | ε
-
-and_expr ::= eq_expr and_expr'
-and_expr' ::= "&&" eq_expr and_expr' | ε
-
-eq_expr ::= rel_expr eq_expr'
-eq_expr' ::= ("==" | "!=") rel_expr eq_expr' | ε
-
-rel_expr ::= add_expr rel_expr'
-rel_expr' ::= ("<" | "<=" | ">" | ">=") add_expr rel_expr' | ε
-
-add_expr ::= mul_expr add_expr'
-add_expr' ::= ("+" | "-") mul_expr add_expr' | ε
-
-mul_expr ::= unary_expr mul_expr'
-mul_expr' ::= ("*" | "/" | "%") unary_expr mul_expr' | ε
-
-unary_expr ::= ("-" | "!") unary_expr
-            | postfix_expr
-
-postfix_expr ::= primary_expr postfix_expr'
-postfix_expr' ::= "(" args ")" | ε
-
-primary_expr ::= IDENT
-              | INT_LIT
-              | FLOAT_LIT
-              | BOOL_LIT
-              | "(" expr ")"
-
-args ::= arg_list | ε
-arg_list ::= expr arg_list'
-arg_list' ::= "," expr arg_list' | ε
-
-
------FIRST SETS-----
-FIRST(expr) = FIRST(assign_expr) = FIRST(or_expr) = ... = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, "(", "-", "!"}
-
-FIRST(assign_expr') = {"=", ε}
-FIRST(or_expr') = {"||", ε}
-FIRST(and_expr') = {"&&", ε}
-FIRST(eq_expr') = {"==", "!=", ε}
-FIRST(rel_expr') = {"<", "<=", ">", ">=", ε}
-FIRST(add_expr') = {"+", "-", ε}
-FIRST(mul_expr') = {"*", "/", "%", ε}
-FIRST(unary_expr) = {"-", "!", IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, "("}
-FIRST(postfix_expr') = {"(", ε}
-FIRST(primary_expr) = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, "("}
-FIRST(args) = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, "(", "-", "!", ε}
-
------FOLLOW SETS-----
+* See report appendix for full transformed grammar and FIRST and FOLLOW sets
 
 */
 
@@ -2123,6 +2045,8 @@ static std::unique_ptr<ASTnode> ParseUnaryExpr() {
   return ParsePostfixExpr();
 }
 
+// postfix_expr  ::= primary_expr postfix_expr'
+// postfix_expr' ::= "(" args ")" | "[" expr "]" postfix_expr' | ε
 // Function calls: IDENT '(' args ')' or just IDENT
 static std::unique_ptr<ASTnode> ParsePostfixExpr() {      // calls vs plain ident
   auto expr = ParsePrimaryExpr();
@@ -2498,9 +2422,7 @@ static std::vector<std::unique_ptr<DeclAST>> ParseLocalDeclsPrime() {
 }
 
 // local_decl ::= var_type IDENT ";"
-// var_type ::= "int"
-//           |  "float"
-//           |  "bool"
+//             |  var_type IDENT array_dims ";"
 // Parse local variable or array declaration
 static std::unique_ptr<DeclAST> ParseLocalDecl() {
   TOKEN PrevTok;
@@ -2619,8 +2541,9 @@ static std::unique_ptr<ASTnode> ParseBlock() {
   return std::make_unique<BlockAST>(std::move(local_decls), std::move(stmt_list));
 }
 
-// decl ::= var_decl
-//       |  fun_decl
+// decl ::= type_spec IDENT ";"
+//       |  type_spec IDENT array_dims ";"
+//       |  type_spec IDENT "(" params ")" block
 // Parse top-level declaration (variable, array or function)
 static std::unique_ptr<ASTnode> ParseDecl() {
   std::string IdName;
@@ -2775,8 +2698,7 @@ static std::unique_ptr<FunctionPrototypeAST> ParseExtern() {
             fprintf(stderr, "Parsed parameter list for external function\n");
 
           if (CurTok.type != RPAR) // syntax error
-            return LogErrorP(
-                CurTok, "Expected ')' after extern function parameters");
+            return LogErrorP(CurTok, "Expected ')' after extern function parameters");
 
           getNextToken(); // eat )
 
